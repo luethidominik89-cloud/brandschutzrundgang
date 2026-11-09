@@ -458,7 +458,7 @@ function katOf(k){for(var i=0;i<KAT.length;i++)if(KAT[i].k===k)return KAT[i];ret
    Daten liegen nur auf dem Gerät (IndexedDB + Spiegel in localStorage). Berichte gehen als PDF per Mail
    an den Teams-Kanal (Ablage SharePoint) und an den Hauswart selbst. */
 "use strict";
-var APP_V="bsr-v1";
+var APP_V="bsr-v2";
 function $(s){return document.querySelector(s)}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function pad(n){return String(n).padStart(2,"0")}
@@ -476,7 +476,7 @@ function stoSort(a,b){return STO_ORD(b)-STO_ORD(a)}
 function key(g,s){return g+"|"+s}
 
 /* ---------- Zustand ---------- */
-var D=null,SET={name:"",mail:"",teams:"",areal:"Industriepark Neuhegi Oberwinterthur",gross:true,lastBackup:0,anzBackup:0},PH=new Map(),V={v:"home"};
+var D=null,SET={name:"",areal:"Industriepark Neuhegi Oberwinterthur",nina:"",pdfAn:"",clientId:"",msUser:"",msName:"",gross:true,lastBackup:0},PH=new Map(),V={v:"home"};
 function leer(){return {id:"main",areal:"",gebaeude:[],orte:{},maengel:[],rundgaenge:[],seq:1,updated:0}}
 
 /* ---------- IndexedDB ---------- */
@@ -527,6 +527,7 @@ function orteVon(g,s){return (D.orte[key(g,s)]||[]).slice().sort(natSort)}
 function lerneOrt(g,s,o){o=String(o||"").trim();if(!o)return;var k=key(g,s),a=D.orte[k]||(D.orte[k]=[]);if(a.map(function(x){return x.toLowerCase()}).indexOf(o.toLowerCase())<0)a.push(o)}
 function prioCls(m){return (PRIO[m.prio]||PRIO.m).cls}
 function fristText(m){if(m.prio==="s")return "sofort";return fDate(m.frist)}
+function fristLang(m){if(m.prio==="s")return "sofort, offen seit "+fDate(m.erfasst);return fDate(m.frist)+(ueberfaellig(m)?" (überfällig)":"")}
 
 /* ---------- Kopf, Tabs, Navigation ---------- */
 var ICON={home:'<svg viewBox="0 0 24 24"><path d="M4 20V9l8-5 8 5v11h-5v-6H9v6z"/></svg>',
@@ -563,7 +564,7 @@ function vHome(m){var R=rgAktiv(),st=stats();head("Brandschutz-Rundgang",(SET.ar
   var h='<div class="stats s3"><button class="stat rot" data-go="mg" data-f="sofort"><span class="n">'+st.sofort+'</span><span class="l">Sofort</span></button>'
    +'<button class="stat gelb" data-go="mg" data-f="ueber"><span class="n">'+st.ueber+'</span><span class="l">Überfällig</span></button>'
    +'<button class="stat z" data-go="mg" data-f=""><span class="n">'+st.offen+'</span><span class="l">Offen total</span></button></div>';
-  if(!SET.name)h+='<div class="card"><h2>Wer macht die Rundgänge?</h2><label class="f">Dein Name<input type="text" id="setName" placeholder="Vorname Nachname"></label><label class="f">Deine E-Mail (Bericht als Kopie an dich)<input type="email" id="setMail"></label><button class="btn pri" data-act="nameOk">Speichern</button></div>';
+  if(!SET.name)h+='<div class="card"><h2>Wer macht die Rundgänge?</h2><label class="f">Dein Name<input type="text" id="setName" placeholder="Vorname Nachname"></label><button class="btn pri" data-act="nameOk">Speichern</button></div>';
   if(!R){h+='<button class="gross-aktion" data-act="neuRg">'+ICON.home+'<span><b>Neuen Rundgang starten</b><small>Gebäude auswählen und Stockwerk für Stockwerk kontrollieren</small></span></button>';
     var L=rgLetzter();if(L)h+='<p class="hint ctr">Letzter Rundgang: '+fDate(L.datum)+' · '+L.geb.length+' Gebäude'+(L.gesendet?' · Berichte gesendet':'')+'</p>'}
   else{var tot=0,done=0;R.geb.forEach(function(g){var gb=geb(g);if(!gb)return;gb.sto.forEach(function(s){tot++;if(R.begangen[key(g,s)])done++})});
@@ -670,30 +671,32 @@ function vBerichte(m){var R=rgAktiv()||rgLetzter();head("Berichte","Pro Gebäude
   var fehlt=[];R.geb.forEach(function(g){(geb(g)||{sto:[]}).sto.forEach(function(s){if(!R.begangen[key(g,s)])fehlt.push(g+" "+s)})});
   if(fehlt.length)h+='<div class="warnbox">Noch nicht als kontrolliert markiert: '+esc(fehlt.join(", "))+'. Im Bericht steht dann «nicht kontrolliert».</div>';
   h+=(R.gesendet?'<div class="banner ok">Berichte gesendet am '+fZeit(R.gesendet)+'</div>':'')+'</div>';
+  if(D.versandOffen)h+='<div class="warnbox">Berichte warten auf den Versand (kein Netz oder Anmeldung nötig).</div>';
   h+='<button class="btn pri big" data-act="pdfAlle">Berichte erstellen und senden ›</button>';
   if(!R.ende)h+='<button class="btn" data-act="rgEnde">Rundgang abschliessen</button>';
   h+='<div class="card"><h2>Einzelbericht für ein Gebäude</h2><p class="hint">Aktueller Stand eines Gebäudes, auch ohne Rundgang (z. B. für den Kunden).</p><select id="egeb">'+D.gebaeude.map(function(x){return x.nr}).sort(natSort).map(function(x){return '<option>'+esc(x)+'</option>'}).join("")+'</select><button class="btn" data-act="pdfEinzel">PDF erstellen</button></div>';
   m.innerHTML=h}
 var PDFS=[];
 function vSenden(m){head("Berichte senden","",true);var R=rgById(V.rg);
-  var adr=empfaenger();
-  var h='<div class="card"><h2>So sendest du die Berichte</h2><ol class="steps"><li><b>Empfänger kopieren</b><br><button class="btn" data-act="kopAdr">Adressen kopieren</button><span class="adr">'+esc(adr||"Keine Adressen hinterlegt – unter «Mehr» eintragen")+'</span></li>'
-   +'<li><b>Senden</b> antippen und <b>Gmail</b> wählen.</li><li>Im Feld «An» lange drücken und <b>Einfügen</b> wählen. Dann senden.</li></ol>'
-   +'<p class="hint">Die Mail geht an den Teams-Kanal (Ablage in SharePoint) und an dich selbst.</p></div>'
-   +'<div class="card"><h2>Erstellte Dateien ('+PDFS.length+')</h2><div class="list">'+PDFS.map(function(f,i){return '<button class="item" data-act="pdfOpen" data-i="'+i+'"><div class="t"><b>'+esc(f.name)+'</b><span>'+Math.round(f.size/1024)+' KB</span></div><span class="chev">›</span></button>'}).join("")+'</div></div>'
-   +'<button class="btn pri big" data-act="teilen">Senden ›</button>';
+  var h='<div class="card"><h2>Empfänger</h2><dl class="dl"><dt>Übersicht</dt><dd>'+esc(SET.nina||"– fehlt –")+'<br><span class="hint">HTML-Mail mit allen offenen Mängeln aller Gebäude</span></dd><dt>PDFs</dt><dd>'+esc(SET.pdfAn||"– fehlt –")+'<br><span class="hint">ein PDF pro Gebäude zur Ablage</span></dd><dt>Absender</dt><dd>'+esc(SET.msUser||"noch nicht angemeldet")+'</dd></dl></div>'
+   +(D.versandOffen?'<div class="warnbox">Versand wartet auf Netz bzw. Anmeldung.</div>':'')
+   +'<button class="btn pri big" data-act="senden">'+(SET.msUser?"Jetzt senden ›":"Mit Geschäftskonto anmelden und senden ›")+'</button>'
+   +'<div class="card"><h2>Erstellte PDFs ('+PDFS.length+')</h2><div class="list">'+PDFS.map(function(f,i){return '<button class="item" data-act="pdfOpen" data-i="'+i+'"><div class="t"><b>'+esc(f.name)+'</b><span>'+Math.round(f.size/1024)+' KB · antippen zum Ansehen</span></div><span class="chev">›</span></button>'}).join("")+'</div></div>';
   if(R&&!R.ende)h+='<button class="btn ok" data-act="rgEnde">Rundgang abschliessen</button>';
+  h+='<button class="btn" data-act="teilen">PDFs anders teilen (z. B. WhatsApp)</button>';
   m.innerHTML=h}
-function empfaenger(){return [SET.teams,SET.mail].filter(function(x){return x&&String(x).trim()}).join(", ")}
 
 /* ---------- Mehr ---------- */
 function vMehr(m){head("Mehr","Einstellungen und Sicherung",false);var neu=D.updated>(SET.lastBackup||0);
   m.innerHTML='<div class="card"><h2>Datensicherung</h2><p class="hint">Letzte Sicherung: '+(SET.lastBackup?fZeit(SET.lastBackup):"noch nie")+(neu?' · seither geändert':'')+'</p><button class="btn pri" data-act="backup">Sicherung jetzt</button><button class="btn" data-act="import">Sicherung oder Startpaket einlesen</button></div>'
   +'<div class="card"><h2>Einstellungen</h2><label class="f">Dein Name (Kontrolleur)<input type="text" data-set="name" value="'+esc(SET.name)+'"></label>'
-  +'<label class="f">Deine E-Mail (Kopie an dich)<input type="email" data-set="mail" value="'+esc(SET.mail)+'"></label>'
-  +'<label class="f">E-Mail-Adresse Teams-Kanal<input type="email" data-set="teams" value="'+esc(SET.teams)+'" placeholder="…@…teams.ms"></label>'
+  +'<label class="f">Übersicht senden an (mehrere mit Komma trennen)<input type="text" inputmode="email" data-set="nina" value="'+esc(SET.nina)+'"></label>'
+  +'<label class="f">PDFs senden an (Ablage)<input type="text" inputmode="email" data-set="pdfAn" value="'+esc(SET.pdfAn)+'"></label>'
   +'<label class="f">Bezeichnung Areal<input type="text" data-set="areal" value="'+esc(SET.areal)+'"></label>'
   +'<label class="check"><input type="checkbox" data-set="gross"'+(SET.gross!==false?" checked":"")+'> <span>Grosse Knöpfe (Handschuhmodus)</span></label></div>'
+  +'<div class="card"><h2>Microsoft-Konto (Versand)</h2>'+(SET.msUser?'<p>Angemeldet als <b>'+esc(SET.msUser)+'</b></p><button class="btn" data-act="msAbm">Abmelden</button>':'<p class="hint">Die Berichte werden über dein Geschäftskonto gesendet.</p><button class="btn pri" data-act="msLogin"'+(msBereit()?'':' disabled')+'>Mit Geschäftskonto anmelden</button>')
+  +(msBereit()?'':'<p class="hint">Noch nicht eingerichtet: die IT muss die App bei Microsoft registrieren.</p>')
+  +'<details class="info"><summary>Einrichtung (nur IT)</summary><label class="f">Anwendungs-ID (Client-ID)<input type="text" data-set="clientId" value="'+esc(SET.clientId)+'"></label><p class="hint">Weiterleitungs-URI: '+esc(msRedirect())+'</p></details></div>'
   +'<div class="list"><button class="item" data-go="gebv"><div class="t"><b>Gebäude und Stockwerke</b><span>'+D.gebaeude.length+' Gebäude</span></div><span class="chev">›</span></button>'
   +'<button class="item" data-go="orte"><div class="t"><b>Gelernte Standorte</b><span>umbenennen oder löschen</span></div><span class="chev">›</span></button></div>'
   +'<div class="card"><h2>Grundlagen</h2><ul class="gl">'+GRUNDLAGEN.map(function(x){return '<li>'+esc(x)+'</li>'}).join("")+'</ul><p class="hint">Prioritäten und Fristen sind interne Festlegungen von DETEC; die VKF schreibt keine Behebungsfristen vor.</p></div>'
@@ -713,7 +716,7 @@ $("#main").addEventListener("click",function(e){var b=e.target.closest("[data-ac
   switch(a){
   case "import":$("#fjson").click();break;
   case "leerStart":var gn=$("#nGeb").value.trim();if(!gn){toast("Bitte Gebäudenummer eingeben");break}D=leer();D.gebaeude.push({nr:gn,sto:["EG"]});SET.areal=$("#nAreal").value.trim();saveSet();save();go("home",{},true);break;
-  case "nameOk":var nmv=$("#setName").value.trim();if(!nmv){toast("Bitte Namen eintragen");break}SET.name=nmv;SET.mail=$("#setMail").value.trim();saveSet();render();break;
+  case "nameOk":var nmv=$("#setName").value.trim();if(!nmv){toast("Bitte Namen eintragen");break}SET.name=nmv;saveSet();render();break;
   case "neuRg":if(!SET.name){toast("Bitte zuerst deinen Namen eintragen");$("#setName").focus();break}go("gebwahl",{sel:[]});break;
   case "gebDazu":go("gebwahl",{sel:[]});break;
   case "gebToggle":var g=b.getAttribute("data-g"),s=V.sel||(V.sel=[]),i=s.indexOf(g);if(i<0)s.push(g);else s.splice(i,1);history.replaceState(V,"");render();break;
@@ -747,7 +750,9 @@ $("#main").addEventListener("click",function(e){var b=e.target.closest("[data-ac
   case "pdfAlle":var RR=rgAktiv()||rgLetzter();berichteErstellen(RR,RR.geb,true);break;
   case "pdfEinzel":berichteErstellen(null,[$("#egeb").value],false);break;
   case "pdfOpen":var f=PDFS[+b.getAttribute("data-i")];if(f)oeffnen(f);break;
-  case "kopAdr":var ad=empfaenger();if(!ad){toast("Zuerst unter «Mehr» die Adressen eintragen");break}(navigator.clipboard?navigator.clipboard.writeText(ad):Promise.reject()).then(function(){toast("Adressen kopiert")}).catch(function(){prompt("Adressen kopieren:",ad)});break;
+  case "senden":versandStarten(V.rg);break;
+  case "msLogin":msLogin("");break;
+  case "msAbm":if(confirm("Vom Geschäftskonto abmelden?"))msAbmelden().then(render);break;
   case "teilen":teilen();break;
   case "rgEnde":var R3=rgAktiv();if(R3&&confirm("Rundgang vom "+fDate(R3.datum)+" abschliessen?")){R3.ende=Date.now();save();toast("Rundgang abgeschlossen");go("home",{},true)}break;
   case "backup":sicherung();break;
@@ -764,7 +769,7 @@ $("#fgal").addEventListener("change",function(){fotoRein(this.files);this.value=
 
 /* ---------- Sicherung / Import ---------- */
 function sicherung(){flushSave().then(function(){return dall("photos")}).then(function(ph){var fotos={};ph.forEach(function(p){fotos[p.id]={data:p.data,w:p.w,h:p.h}});
-  var obj={typ:"bsr-sicherung",version:1,erstellt:new Date().toISOString(),app:APP_V,set:{areal:SET.areal,teams:SET.teams},daten:D,fotos:fotos};
+  var obj={typ:"bsr-sicherung",version:1,erstellt:new Date().toISOString(),app:APP_V,set:{areal:SET.areal,nina:SET.nina,pdfAn:SET.pdfAn,clientId:SET.clientId},daten:D,fotos:fotos};
   var name="Sicherung_Brandschutzrundgang_"+todayIso()+".json",blob=new Blob([JSON.stringify(obj)],{type:"application/json"}),file=new File([blob],name,{type:"application/json"});
   var fertig=function(){SET.lastBackup=Date.now();saveSet();render();toast("Sicherung erstellt")};
   if(navigator.canShare&&navigator.canShare({files:[file]}))navigator.share({files:[file],title:name}).then(fertig).catch(function(err){if(err&&err.name==="AbortError")return;download(blob,name);fertig()});else{download(blob,name);fertig()}})}
@@ -780,7 +785,7 @@ function einlesen(o){if(!o||o.typ!=="bsr-sicherung"||!o.daten){toast("Datei ist 
       Object.keys(n.orte||{}).forEach(function(k){n.orte[k].forEach(function(o2){var p2=k.split("|");lerneOrt(p2[0],p2[1],o2)})});
       n.maengel.forEach(function(m){var e=mById(m.id);if(!e){m.nr=D.seq++;D.maengel.push(m)}else{(m.fotos||[]).forEach(function(f){if(e.fotos.indexOf(f)<0)e.fotos.push(f)})}});
       (n.rundgaenge||[]).forEach(function(r){if(!rgById(r.id))D.rundgaenge.push(r)})}
-    if(o.set){if(o.set.areal&&!SET.areal)SET.areal=o.set.areal;if(o.set.areal&&leerJetzt)SET.areal=o.set.areal;if(o.set.teams&&!SET.teams)SET.teams=o.set.teams;saveSet()}
+    if(o.set){if(o.set.areal&&!SET.areal)SET.areal=o.set.areal;if(o.set.areal&&leerJetzt)SET.areal=o.set.areal;["nina","pdfAn","clientId"].forEach(function(k){if(o.set[k]&&!SET[k])SET[k]=o.set[k]});saveSet()}
     save();PH.clear();toast(ids.length+" Fotos und "+n.maengel.length+" Mängel eingelesen",3500);go("home",{},true)})
   .catch(function(e){errBanner("Einlesen fehlgeschlagen: "+(e&&e.message||e))})}
 
@@ -800,7 +805,9 @@ function init(){try{var s=JSON.parse(localStorage.getItem("bsr_set")||"null");if
   .then(function(){return Promise.all([dget("data","main"),dget("meta","set")])}).then(function(r){var d=r[0],sp=null;try{sp=JSON.parse(localStorage.getItem("bsr_spiegel")||"null")}catch(e){}
     if(sp&&(!d||(sp.updated||0)>(d.updated||0))){d=sp;D=d;save()}else D=d||leer();if(r[1]&&r[1].v)Object.assign(SET,r[1].v);
     D.maengel=D.maengel.filter(function(m){return !(m.status==="entwurf"&&!m.code&&!(m.fotos||[]).length)});
-    history.replaceState(V,"");render();if(rgAktiv())wake()}).catch(function(e){D=leer();errBanner("Laden fehlgeschlagen: "+(e&&e.message||e));render()});
+    history.replaceState(V,"");render();if(rgAktiv())wake();
+    msRueckkehr().then(function(w){if(w==null)return warteschlange();render();toast("Angemeldet als "+SET.msUser,3000);if(w==="senden"&&D.versandOffen){var id=D.versandOffen==="-"?"":D.versandOffen;V={v:"send",rg:id};history.replaceState(V,"");PDFS=[];versandStarten(id)}})
+     .catch(function(e){errBanner("Microsoft-Anmeldung: "+(e&&e.message||e))})}).catch(function(e){D=leer();errBanner("Laden fehlgeschlagen: "+(e&&e.message||e));render()});
   if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").then(function(r){SWREG=r}).catch(function(){});
   updCheck()}
 init();
@@ -858,7 +865,7 @@ function pdfGebaeude(R,g){var gb=geb(g)||{sto:[]},jetzt=new Date(),datum=R?R.dat
   o.h2("2. Offene Mängel – Übersicht");
   if(!offen.length)o.txt("Keine offenen Mängel.",10);
   else o.tabelle([{t:"Nr.",w:15},{t:"Stockwerk",w:18},{t:"Standort",w:36},{t:"Feststellung",w:69},{t:"Priorität",w:20},{t:"Frist",w:22}],
-    offen.map(function(x){return [mNr(x.nr),x.sto,x.ort||"–",mText(x),(PRIO[x.prio]||PRIO.m).l,fristText(x)+(ueberfaellig(x)?" (überfällig)":"")]}),
+    offen.map(function(x){return [mNr(x.nr),x.sto,x.ort||"–",mText(x),(PRIO[x.prio]||PRIO.m).l,fristLang(x)]}),
     {farbe:function(zi,i){var x=offen[zi];if(i===4)return {c:PRIOFARBE[x.prio]||GELB,bold:true};if(i===5&&ueberfaellig(x))return {c:ROT,bold:true};return null}});
   var p=Promise.resolve();
   if(offen.length){p=p.then(function(){o.h2("3. Offene Mängel – Details mit Fotos")});offen.forEach(function(x){p=p.then(function(){return mangelBlock(o,x,"fotos")})})}
@@ -899,7 +906,7 @@ function pdfUebersicht(R){var datum=R?R.datum:todayIso(),alle=offene().sort(func
   o.h2("2. Alle offenen Mängel");
   if(!alle.length)o.txt("Keine offenen Mängel.",10);
   else o.tabelle([{t:"Nr.",w:14},{t:"Geb.",w:12},{t:"Stw.",w:15},{t:"Standort",w:33},{t:"Feststellung",w:62},{t:"Prio.",w:15},{t:"Frist",w:29}],
-    alle.map(function(x){return [mNr(x.nr),x.geb,x.sto,x.ort||"–",mText(x),(PRIO[x.prio]||PRIO.m).l,fristText(x)+(ueberfaellig(x)?" überfällig":"")]}),
+    alle.map(function(x){return [mNr(x.nr),x.geb,x.sto,x.ort||"–",mText(x),(PRIO[x.prio]||PRIO.m).l,fristLang(x)]}),
     {fs:7.8,farbe:function(zi,i){var x=alle[zi];if(i===5)return {c:PRIOFARBE[x.prio],bold:true};if(i===6&&ueberfaellig(x))return {c:ROT,bold:true};return null}});
   o.y+=3;o.txt("Fotos und Details stehen in den Berichten der einzelnen Gebäude. Prioritäten und Fristen sind interne Festlegungen von DETEC Facility Services.",7.5,"normal",GRAU);
   o.fuesse();return Promise.resolve({name:"Brandschutzrundgang_Uebersicht_alle_Gebaeude_"+datum+".pdf",blob:o.d.output("blob")})}
@@ -916,9 +923,105 @@ function oeffnen(f){var u=URL.createObjectURL(f.blob),w=window.open(u,"_blank");
 function teilen(){if(!PDFS.length){toast("Keine Berichte erstellt");return}var files=PDFS.map(function(f){return f.file}),R=rgById(V.rg);
   var titel="Brandschutz-Rundgang "+(SET.areal||"")+" "+fDate(R?R.datum:todayIso());
   var text=titel+"\n\nIm Anhang die Berichte:\n"+PDFS.map(function(f){return "- "+f.name}).join("\n")+"\n\nOffene Mängel total: "+offene().length+"\n"+(SET.name||"");
-  var gesendet=function(){if(R){R.gesendet=Date.now();save()}render();toast("Gesendet – bitte im Gmail prüfen")};
+  var gesendet=function(){if(R){R.gesendet=Date.now();save()}render();toast("Geteilt")};
   if(navigator.canShare&&navigator.canShare({files:files}))navigator.share({files:files,title:titel,text:text}).then(gesendet).catch(function(e){if(e&&e.name!=="AbortError")errBanner("Teilen nicht möglich: "+e.message)});
   else{PDFS.forEach(function(f,i){setTimeout(function(){download(f.blob,f.name)},i*600)});toast("Dateien heruntergeladen – bitte per Mail senden",4000)}}
+
+/* ===== Versand über Microsoft 365 (Anmeldung mit Geschäftskonto, Microsoft Graph) =====
+   Ablauf: OAuth 2.0 Autorisierungscode mit PKCE (Single-Page-App, kein Server, kein Geheimnis im Code).
+   CLIENT_ID kommt aus der App-Registrierung in Entra ID (DETEC-IT). */
+var MS={tenant:"77946512-1500-4996-8861-061d5b249bb5",clientId:"",scope:"openid profile offline_access User.Read Mail.Send"};
+function msRedirect(){return location.origin+location.pathname.replace(/index\.html$/,"")}
+function b64url(buf){var s=btoa(String.fromCharCode.apply(null,new Uint8Array(buf)));return s.replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
+function zufall(n){var a=new Uint8Array(n);crypto.getRandomValues(a);return b64url(a)}
+function msBereit(){return !!(MS.clientId||SET.clientId)}
+function msCid(){return SET.clientId||MS.clientId}
+function msLogin(weiter){if(!msBereit()){toast("Microsoft-Versand ist noch nicht eingerichtet (Client-ID fehlt)",4000);return}
+  var v=zufall(48),st=zufall(16);crypto.subtle.digest("SHA-256",new TextEncoder().encode(v)).then(function(h){
+    localStorage.setItem("bsr_pkce",JSON.stringify({v:v,st:st,weiter:weiter||""}));
+    var q={client_id:msCid(),response_type:"code",redirect_uri:msRedirect(),response_mode:"query",scope:MS.scope,state:st,code_challenge:b64url(h),code_challenge_method:"S256",prompt:"select_account"};
+    if(SET.msUser)q.login_hint=SET.msUser;
+    location.href="https://login.microsoftonline.com/"+MS.tenant+"/oauth2/v2.0/authorize?"+new URLSearchParams(q)})}
+function msToken(form){form.client_id=msCid();form.scope=MS.scope;
+  return fetch("https://login.microsoftonline.com/"+MS.tenant+"/oauth2/v2.0/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(form)})
+  .then(function(r){return r.json()}).then(function(j){if(!j.access_token)throw new Error(j.error_description||j.error||"Anmeldung fehlgeschlagen");
+    var t={a:j.access_token,r:j.refresh_token||"",exp:Date.now()+(j.expires_in-120)*1000};return dput("meta",{k:"ms",v:t}).then(function(){return t})})}
+/* nach der Rückkehr vom Microsoft-Login */
+function msRueckkehr(){var u=new URL(location.href),code=u.searchParams.get("code"),st=u.searchParams.get("state"),err=u.searchParams.get("error");
+  if(!code&&!err)return Promise.resolve(null);history.replaceState(null,"",msRedirect());
+  var p={};try{p=JSON.parse(localStorage.getItem("bsr_pkce")||"{}")}catch(e){}localStorage.removeItem("bsr_pkce");
+  if(err)return Promise.reject(new Error(u.searchParams.get("error_description")||err));
+  if(!p.v||p.st!==st)return Promise.reject(new Error("Anmeldung ungültig, bitte nochmals"));
+  return msToken({grant_type:"authorization_code",code:code,redirect_uri:msRedirect(),code_verifier:p.v}).then(function(){return graph("GET","/me")})
+   .then(function(me){SET.msUser=me.userPrincipalName||me.mail||"";SET.msName=me.displayName||"";if(!SET.name&&me.displayName)SET.name=me.displayName;saveSet();return p.weiter})}
+function msGueltig(){return dget("meta","ms").then(function(r){var t=r&&r.v;if(!t)return null;if(t.exp>Date.now())return t.a;
+  if(!t.r)return null;return msToken({grant_type:"refresh_token",refresh_token:t.r}).then(function(n){return n.a}).catch(function(){return null})})}
+function msAbmelden(){return ddel("meta","ms").then(function(){SET.msUser="";SET.msName="";saveSet()})}
+function graph(method,path,body,roh){return msGueltig().then(function(tok){if(!tok){var e=new Error("Anmeldung nötig");e.login=true;throw e}
+  return fetch("https://graph.microsoft.com/v1.0"+path,{method:method,headers:Object.assign({Authorization:"Bearer "+tok},body!=null&&!roh?{"Content-Type":"application/json"}:{}),body:body==null?undefined:(roh?body:JSON.stringify(body))})
+  .then(function(r){if(r.status===401){var e=new Error("Anmeldung abgelaufen");e.login=true;throw e}
+    if(!r.ok)return r.text().then(function(t){var m=t;try{m=JSON.parse(t).error.message}catch(e){}throw new Error("Microsoft: "+m)});
+    return r.status===202||r.status===204?null:r.json()})})}
+function blobB64(b){return new Promise(function(res,rej){var f=new FileReader();f.onload=function(){res(String(f.result).split(",")[1])};f.onerror=rej;f.readAsDataURL(b)})}
+function an(adr){return String(adr||"").split(/[,;\s]+/).filter(Boolean).map(function(a){return {emailAddress:{address:a}}})}
+/* Mail mit Anhängen: Entwurf anlegen, Anhänge einzeln (grosse über Upload-Sitzung), dann senden */
+function mailMitPdfs(betreff,html,empf,pdfs){return graph("POST","/me/messages",{subject:betreff,body:{contentType:"HTML",content:html},toRecipients:an(empf)}).then(function(m){
+  var p=Promise.resolve();pdfs.forEach(function(f){p=p.then(function(){
+    if(f.blob.size<3000000)return blobB64(f.blob).then(function(b){return graph("POST","/me/messages/"+m.id+"/attachments",{"@odata.type":"#microsoft.graph.fileAttachment",name:f.name,contentType:"application/pdf",contentBytes:b})});
+    return graph("POST","/me/messages/"+m.id+"/attachments/createUploadSession",{AttachmentItem:{attachmentType:"file",name:f.name,size:f.blob.size}}).then(function(s){
+      var CH=327680*10,q=Promise.resolve();for(var o=0;o<f.blob.size;o+=CH)(function(o){q=q.then(function(){var e=Math.min(o+CH,f.blob.size);
+        return fetch(s.uploadUrl,{method:"PUT",headers:{"Content-Range":"bytes "+o+"-"+(e-1)+"/"+f.blob.size},body:f.blob.slice(o,e)}).then(function(r){if(!r.ok)throw new Error("Upload "+f.name+" fehlgeschlagen")})})})(o);return q})})});
+  return p.then(function(){return graph("POST","/me/messages/"+m.id+"/send")})})}
+function mailHtml(betreff,html,empf){return graph("POST","/me/sendMail",{message:{subject:betreff,body:{contentType:"HTML",content:html},toRecipients:an(empf)},saveToSentItems:true})}
+
+/* ---------- HTML-Übersicht für die Mail an die Kontrolle ---------- */
+/* Link auf die interaktive Übersicht (Suchen/Sortieren). Daten komprimiert im #-Teil, wird nie an den Server gesendet. */
+function uebersichtLink(R){var alle=offene(),beh=R?D.maengel.filter(function(x){return x.behobenRg===R.id}):[];
+  var o={a:SET.areal||"",s:Date.now(),h:todayIso(),r:R?[R.datum,R.von||SET.name||"",R.geb]:null,
+    g:D.gebaeude.map(function(x){return [x.nr,letzteKontrolle(x.nr)]}),
+    m:alle.map(function(x){return [x.nr,x.geb,x.sto,x.ort||"",mText(x),x.prio,x.frist||"",(x.erfasst||"").slice(0,10),x.bem||""]}),
+    b:beh.map(function(x){return [x.nr,x.geb,x.sto,x.ort||"",mText(x),x.behobenBem||""]})};
+  var cs=new Blob([JSON.stringify(o)]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+  return new Response(cs).arrayBuffer().then(function(buf){var u=new Uint8Array(buf),bin="";for(var i=0;i<u.length;i+=32768)bin+=String.fromCharCode.apply(null,u.subarray(i,i+32768));
+    return location.origin+location.pathname.replace(/[^\/]*$/,"")+"uebersicht.html#d="+btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")})}
+function htmlUebersicht(R,link){var alle=offene().sort(function(a,b){return natSort(a.geb,b.geb)||sortM(a,b)}),gebs=D.gebaeude.map(function(x){return x.nr}).sort(natSort);
+  var td='style="padding:6px 8px;border-bottom:1px solid #d2dadb;font:13px Arial,sans-serif;vertical-align:top"',th='style="padding:6px 8px;background:#dcedee;color:#0b6e77;font:bold 12px Arial,sans-serif;text-align:left"';
+  var farbe={s:"#b3122c",m:"#c45f00",n:"#2c7a52"},beh=R?D.maengel.filter(function(x){return x.behobenRg===R.id}):[];
+  var h='<div style="font:14px Arial,sans-serif;color:#1a1d21;max-width:900px">'
+   +(link?'<table cellspacing="0" style="margin:0 0 14px"><tr><td style="background:#0b6e77;border-radius:6px;padding:12px 20px"><a href="'+link+'" style="color:#ffffff;font:bold 15px Arial,sans-serif;text-decoration:none">Übersicht öffnen – suchen, filtern und sortieren ›</a></td></tr></table>':'')
+   +'<div style="border-top:4px solid #0b6e77;padding-top:10px"><b style="font-size:20px">Brandschutz-Rundgang – offene Mängel aller Gebäude</b><br><span style="color:#56687a">'+esc(SET.areal||"")+' · Stand '+fZeit(Date.now())+'</span></div>'
+   +'<p>'+(R?'Rundgang vom <b>'+fDate(R.datum)+'</b> durch '+esc(R.von||SET.name||"")+', kontrollierte Gebäude: <b>'+esc(R.geb.join(", "))+'</b>.':'Aktueller Stand ohne Rundgang.')+'</p>'
+   +'<table cellspacing="0" style="border-collapse:collapse;margin:6px 0 14px"><tr>'
+   +[["Offen",alle.length,"#c45f00"],["davon sofort",alle.filter(function(x){return x.prio==="s"}).length,"#b3122c"],["davon überfällig",alle.filter(ueberfaellig).length,"#b3122c"],["Behoben im Rundgang",beh.length,"#2c7a52"]].map(function(k){return '<td style="padding:8px 16px 8px 0"><div style="font:bold 22px Arial,sans-serif;color:'+k[2]+'">'+k[1]+'</div><div style="font:12px Arial,sans-serif;color:#56687a">'+k[0]+'</div></td>'}).join("")+'</tr></table>'
+   +'<b style="color:#0b6e77">Stand pro Gebäude</b><table cellspacing="0" style="border-collapse:collapse;width:100%;margin:6px 0 16px"><tr><th '+th+'>Gebäude</th><th '+th+'>Letzte Kontrolle</th><th '+th+'>Offen</th><th '+th+'>Sofort</th><th '+th+'>Überfällig</th></tr>'
+   +gebs.map(function(g){var o=alle.filter(function(x){return x.geb===g}),lk=letzteKontrolle(g),u=o.filter(ueberfaellig).length;return '<tr><td '+td+'><b>'+esc(g)+'</b></td><td '+td+'>'+(lk?fDate(lk):"–")+'</td><td '+td+'>'+o.length+'</td><td '+td+'>'+o.filter(function(x){return x.prio==="s"}).length+'</td><td '+td+'>'+(u?'<b style="color:#b3122c">'+u+'</b>':"0")+'</td></tr>'}).join("")+'</table>'
+   +'<b style="color:#0b6e77">Alle offenen Mängel</b><table cellspacing="0" style="border-collapse:collapse;width:100%;margin:6px 0 16px"><tr><th '+th+'>Nr.</th><th '+th+'>Geb.</th><th '+th+'>Stw.</th><th '+th+'>Standort</th><th '+th+'>Feststellung</th><th '+th+'>Priorität</th><th '+th+'>Frist</th></tr>'
+   +(alle.length?alle.map(function(x){return '<tr><td '+td+'>'+mNr(x.nr)+'</td><td '+td+'>'+esc(x.geb)+'</td><td '+td+'>'+esc(x.sto)+'</td><td '+td+'>'+esc(x.ort||"–")+'</td><td '+td+'>'+esc(mText(x))+(x.bem?'<br><i style="color:#56687a">'+esc(x.bem)+'</i>':'')+'</td><td '+td+'><b style="color:'+farbe[x.prio]+'">'+(PRIO[x.prio]||PRIO.m).l+'</b></td><td '+td+'>'+(ueberfaellig(x)?'<b style="color:#b3122c">'+fristLang(x)+'</b>':fristLang(x))+'</td></tr>'}).join(""):'<tr><td '+td+' colspan="7">Keine offenen Mängel.</td></tr>')+'</table>';
+  if(beh.length)h+='<b style="color:#2c7a52">Im Rundgang behoben</b><table cellspacing="0" style="border-collapse:collapse;width:100%;margin:6px 0 16px"><tr><th '+th+'>Nr.</th><th '+th+'>Geb.</th><th '+th+'>Stw.</th><th '+th+'>Standort</th><th '+th+'>Feststellung</th><th '+th+'>Bemerkung</th></tr>'
+   +beh.map(function(x){return '<tr><td '+td+'>'+mNr(x.nr)+'</td><td '+td+'>'+esc(x.geb)+'</td><td '+td+'>'+esc(x.sto)+'</td><td '+td+'>'+esc(x.ort||"–")+'</td><td '+td+'>'+esc(mText(x))+'</td><td '+td+'>'+esc(x.behobenBem||"")+'</td></tr>'}).join("")+'</table>';
+  h+='<p style="font-size:12px;color:#56687a">Fotos und Details stehen in den PDF-Berichten pro Gebäude (Ablage durch den Hausdienst). Grundlage: VKF-Brandschutzrichtlinie 12-15 «Brandverhütung und organisatorischer Brandschutz», Ziff. 3.1 und 4.2. Prioritäten und Fristen sind interne Festlegungen von DETEC Facility Services.</p></div>';
+  return h}
+function htmlPdfMail(R){return '<div style="font:14px Arial,sans-serif;color:#1a1d21"><p>Brandschutz-Rundgang '+esc(SET.areal||"")+(R?' vom <b>'+fDate(R.datum)+'</b>':'')+'.</p><p>Im Anhang die Berichte pro Gebäude zur Ablage (SharePoint / Campos):</p><ul>'+PDFS.map(function(f){return '<li>'+esc(f.name)+'</li>'}).join("")+'</ul><p>Offene Mängel total: <b>'+offene().length+'</b></p><p>'+esc(SET.name||"")+'</p></div>'}
+
+/* ---------- Senden (mit Warteschlange ohne Netz) ---------- */
+function versandStarten(rgId){var R=rgById(rgId);
+  if(!SET.nina||!SET.pdfAn){toast("Bitte unter «Mehr» die Empfänger eintragen",4000);go("me");return}
+  if(!navigator.onLine){D.versandOffen=rgId||"-";save();toast("Kein Netz – die Berichte werden automatisch gesendet, sobald du wieder Empfang hast",5000);render();return}
+  if(!msBereit()){toast("Microsoft-Versand noch nicht eingerichtet",4000);return}
+  var ov=$("#busy");ov.hidden=false;ov.querySelector("span").textContent="Wird gesendet …";
+  var titel="Brandschutz-Rundgang "+(SET.areal||"")+" "+fDate(R?R.datum:todayIso());
+  var p=PDFS.length?Promise.resolve():neuErstellen(R);
+  p.then(function(){ov.querySelector("span").textContent="Mail an "+SET.nina+" …";return uebersichtLink(R).then(function(l){return mailHtml(titel+" – offene Mängel",htmlUebersicht(R,l),SET.nina)})})
+   .then(function(){ov.querySelector("span").textContent="PDFs an "+SET.pdfAn+" …";return mailMitPdfs(titel+" – Berichte pro Gebäude",htmlPdfMail(R),SET.pdfAn,PDFS)})
+   .then(function(){ov.hidden=true;if(R){R.gesendet=Date.now()}delete D.versandOffen;save();render();toast("Gesendet an "+SET.nina+" und "+SET.pdfAn,4000)})
+   .catch(function(e){ov.hidden=true;if(e&&e.login){D.versandOffen=rgId||"-";save();msLogin("senden");return}
+     if(!navigator.onLine||/fetch/i.test(String(e&&e.message))){D.versandOffen=rgId||"-";save();toast("Keine Verbindung – wird später automatisch gesendet",5000);render();return}
+     errBanner("Senden fehlgeschlagen: "+(e&&e.message||e))})}
+function neuErstellen(R){var gebs=R?R.geb:[];var out=[],p=Promise.resolve();gebs.forEach(function(g){p=p.then(function(){return pdfGebaeude(R,g)}).then(function(f){out.push(f)})});
+  return p.then(function(){PDFS=out.map(function(f){return {name:f.name,size:f.blob.size,blob:f.blob,file:new File([f.blob],f.name,{type:"application/pdf"})}})})}
+function warteschlange(){if(!D||!D.versandOffen||!navigator.onLine||!msBereit())return;msGueltig().then(function(t){if(!t){errBanner("Berichte warten auf den Versand – bitte unter «Berichte» auf «Jetzt senden» tippen und anmelden.");return}
+  var id=D.versandOffen==="-"?"":D.versandOffen;PDFS=[];versandStarten(id)})}
+addEventListener("online",warteschlange);
 
 </script>
 </body>
