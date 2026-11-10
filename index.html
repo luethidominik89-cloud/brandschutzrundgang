@@ -458,7 +458,7 @@ function katOf(k){for(var i=0;i<KAT.length;i++)if(KAT[i].k===k)return KAT[i];ret
    Daten liegen nur auf dem Gerät (IndexedDB + Spiegel in localStorage). Berichte gehen als PDF per Mail
    an den Teams-Kanal (Ablage SharePoint) und an den Hauswart selbst. */
 "use strict";
-var APP_V="bsr-v3";
+var APP_V="bsr-v4";
 function $(s){return document.querySelector(s)}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function pad(n){return String(n).padStart(2,"0")}
@@ -964,14 +964,16 @@ function graph(method,path,body,roh){return msGueltig().then(function(tok){if(!t
     return r.status===202||r.status===204?null:r.json()})})}
 function blobB64(b){return new Promise(function(res,rej){var f=new FileReader();f.onload=function(){res(String(f.result).split(",")[1])};f.onerror=rej;f.readAsDataURL(b)})}
 function an(adr){return String(adr||"").split(/[,;\s]+/).filter(Boolean).map(function(a){return {emailAddress:{address:a}}})}
-/* Mail mit Anhängen: Entwurf anlegen, Anhänge einzeln (grosse über Upload-Sitzung), dann senden */
-function mailMitPdfs(betreff,html,empf,pdfs){return graph("POST","/me/messages",{subject:betreff,body:{contentType:"HTML",content:html},toRecipients:an(empf)}).then(function(m){
-  var p=Promise.resolve();pdfs.forEach(function(f){p=p.then(function(){
-    if(f.blob.size<3000000)return blobB64(f.blob).then(function(b){return graph("POST","/me/messages/"+m.id+"/attachments",{"@odata.type":"#microsoft.graph.fileAttachment",name:f.name,contentType:"application/pdf",contentBytes:b})});
-    return graph("POST","/me/messages/"+m.id+"/attachments/createUploadSession",{AttachmentItem:{attachmentType:"file",name:f.name,size:f.blob.size}}).then(function(s){
-      var CH=327680*10,q=Promise.resolve();for(var o=0;o<f.blob.size;o+=CH)(function(o){q=q.then(function(){var e=Math.min(o+CH,f.blob.size);
-        return fetch(s.uploadUrl,{method:"PUT",headers:{"Content-Range":"bytes "+o+"-"+(e-1)+"/"+f.blob.size},body:f.blob.slice(o,e)}).then(function(r){if(!r.ok)throw new Error("Upload "+f.name+" fehlgeschlagen")})})})(o);return q})})});
-  return p.then(function(){return graph("POST","/me/messages/"+m.id+"/send")})})}
+/* Mail mit PDF-Anhängen nur über /me/sendMail (braucht nur das Recht Mail.Send).
+   Graph nimmt pro Anfrage max. 4 MB an: PDFs werden deshalb auf mehrere Mails verteilt (je max. ca. 2.8 MB Anhang). */
+var MAX_TEIL=2800000;
+function mailMitPdfs(betreff,html,empf,pdfs){return Promise.all(pdfs.map(function(f){return blobB64(f.blob).then(function(b){return {name:f.name,b:b,n:b.length}})})).then(function(liste){
+  var teile=[],akt=[],sum=0;liste.forEach(function(x){if(x.n>3600000)throw new Error("PDF "+x.name+" ist zu gross für den Mailversand ("+Math.round(x.n*3/4/1048576*10)/10+" MB). Bitte weniger Fotos pro Gebäude.");
+    if(akt.length&&sum+x.n>MAX_TEIL){teile.push(akt);akt=[];sum=0}akt.push(x);sum+=x.n});if(akt.length)teile.push(akt);
+  var p=Promise.resolve();teile.forEach(function(t,i){p=p.then(function(){
+    return graph("POST","/me/sendMail",{message:{subject:betreff+(teile.length>1?" (Teil "+(i+1)+"/"+teile.length+")":""),body:{contentType:"HTML",content:html},toRecipients:an(empf),
+      attachments:t.map(function(x){return {"@odata.type":"#microsoft.graph.fileAttachment",name:x.name,contentType:"application/pdf",contentBytes:x.b}})},saveToSentItems:true})})});
+  return p})}
 function mailHtml(betreff,html,empf){return graph("POST","/me/sendMail",{message:{subject:betreff,body:{contentType:"HTML",content:html},toRecipients:an(empf)},saveToSentItems:true})}
 
 /* ---------- HTML-Übersicht für die Mail an die Kontrolle ---------- */

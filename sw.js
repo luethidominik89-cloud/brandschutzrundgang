@@ -1,7 +1,7 @@
 /* Offline-Speicher der App Brandschutz-Rundgang.
    WICHTIG bei jedem Update: VERSION hier UND APP_V in index.html gleich hochzählen.
    Die erfassten Daten liegen NICHT hier, sondern im Gerätespeicher (IndexedDB) – ein Update löscht sie nie. */
-const VERSION = 'bsr-v3';
+const VERSION = 'bsr-v4';
 const DATEIEN = ['./', './index.html', './jspdf.min.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(DATEIEN.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
