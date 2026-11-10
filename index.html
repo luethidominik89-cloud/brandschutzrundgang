@@ -458,7 +458,7 @@ function katOf(k){for(var i=0;i<KAT.length;i++)if(KAT[i].k===k)return KAT[i];ret
    Daten liegen nur auf dem Gerät (IndexedDB + Spiegel in localStorage). Berichte gehen als PDF per Mail
    an den Teams-Kanal (Ablage SharePoint) und an den Hauswart selbst. */
 "use strict";
-var APP_V="bsr-v2";
+var APP_V="bsr-v3";
 function $(s){return document.querySelector(s)}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function pad(n){return String(n).padStart(2,"0")}
@@ -930,7 +930,7 @@ function teilen(){if(!PDFS.length){toast("Keine Berichte erstellt");return}var f
 /* ===== Versand über Microsoft 365 (Anmeldung mit Geschäftskonto, Microsoft Graph) =====
    Ablauf: OAuth 2.0 Autorisierungscode mit PKCE (Single-Page-App, kein Server, kein Geheimnis im Code).
    CLIENT_ID kommt aus der App-Registrierung in Entra ID (DETEC-IT). */
-var MS={tenant:"77946512-1500-4996-8861-061d5b249bb5",clientId:"",scope:"openid profile offline_access User.Read Mail.Send"};
+var MS={tenant:"77946512-1500-4996-8861-061d5b249bb5",clientId:"42a4a34b-d111-430d-ad7b-a2e0e08c7240",scope:"openid offline_access User.Read Mail.Send"};
 function msRedirect(){return location.origin+location.pathname.replace(/index\.html$/,"")}
 function b64url(buf){var s=btoa(String.fromCharCode.apply(null,new Uint8Array(buf)));return s.replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
 function zufall(n){var a=new Uint8Array(n);crypto.getRandomValues(a);return b64url(a)}
